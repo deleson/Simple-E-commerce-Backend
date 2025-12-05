@@ -1,0 +1,55 @@
+# --- 1. 敏感配置 (绝对不能上传) ---
+.env
+.env.docker
+.venv
+env/
+venv/
+e_project_vene/
+keys/*
+
+# --- 2. Python 编译垃圾 ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- 3. Django 数据与文件 ---
+*.sqlite3
+media/
+staticfiles/
+
+# --- 4. IDE 生成的配置 (别人不需要) ---
+.idea/
+.vscode/
+*.swp
+
+# --- 5. 操作系统垃圾文件 ---
+.DS_Store
+Thumbs.db
+
+# --- 6. Docker 忽略 ---
+# 如果你的数据库挂载在本地目录下，要忽略
+db_data/
+redis_data/
+es_data/
+
+# --- 特殊处理：保留 keys 文件夹结构，但忽略里面的内容 ---
+# 上面的 keys/* 会忽略所有内容
+# 下面这行这叫“反向保留”，确保 git 还是会上传这个空文件夹
+!keys/.gitkeep
+
+
+#其他
+测试结果/
+pytest.ini
+output_celery_task.py
+celerybeat-schedule.bak
+celerybeat-schedule.dat
+celerybeat-schedule.dir
+[internal]
+django_project/settings/base.py
+django_project/settings/dev.py
+django_project/settings/prod.py
+.dockerignore
+.pytest_cache/
+docker.rar
+docker/
