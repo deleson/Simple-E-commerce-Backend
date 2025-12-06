@@ -1,16 +1,34 @@
 #!/bin/sh
 
-# 1. 只有当传入的命令是启动 Web 服务时，才执行迁移和静态文件收集
-# 这样防止 Celery Worker 和 Beat 启动时也重复执行这些操作，浪费时间且容易冲突
+# 如果是启动 web 服务
 if [ "$1" = "gunicorn" ]; then
+
+    # --- 等待数据库逻辑 (必须有这段) ---
+    host="${DB_HOST:-db}"
+    port="${DB_PORT:-3306}"
+
+    echo "Check 1: Waiting for MySQL at $host:$port..."
+
+    # 循环检测，直到端口通了为止
+    # nc (netcat) 是我们在 Dockerfile 里装的工具
+    while ! nc -z $host $port; do
+      echo "MySQL is unavailable - sleeping"
+      sleep 1
+    done
+
+    echo "MySQL is up - continuing"
+    # ----------------------------------
+
     echo "Collecting static files..."
     python manage.py collectstatic --noinput
 
     echo "Applying database migrations..."
     python manage.py migrate
+
+    echo "Initializing data..."
+    # 加上 || true 防止重复初始化报错中断
+    python manage.py init_data || true
 fi
 
-# 2. 【核心修正】执行传入的命令
-# 这会执行 docker-compose.yml 里定义的 command
 echo "Executing command: $@"
 exec "$@"

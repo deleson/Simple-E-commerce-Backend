@@ -49,7 +49,7 @@ services:
 
   # 5. Django Backend (核心应用)
   backend:
-    image: my-shop-backend:v1.0
+    image: my-shop-backend:v1.1
     container_name: ecommerce_backend
     restart: always
 
@@ -69,7 +69,7 @@ services:
 
   # 6. Celery Worker (异步任务)
   celery_worker:
-    image: my-shop-backend:v1.0
+    image: my-shop-backend:v1.1
     container_name: ecommerce_worker
     restart: always
     command: celery -A django_project worker -l info
@@ -84,7 +84,7 @@ services:
 
   # 7. Celery Beat (定时任务)
   celery_beat:
-    image: my-shop-backend:v1.0
+    image: my-shop-backend:v1.1
     container_name: ecommerce_beat
     restart: always
     command: celery -A django_project beat -l info

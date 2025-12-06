@@ -52,4 +52,6 @@ django_project/settings/prod.py
 .dockerignore
 .pytest_cache/
 docker.rar
-docker/
+*.tar
+docker/*
+

@@ -1,5 +1,7 @@
 **本项目是本人作为后端新手初学django所写，仅作为学习使用，并且受限于本人的技术能力，该项目包含的问题和性能问题可能会比较多。**
 
+此外本项目是纯后端项目，没有前端界面
+
 
 
 ---
@@ -188,17 +190,19 @@ docker exec -it ecommerce_backend python manage.py search_index --rebuild
 
 1. 在项目根目录下新建 `.env.docker` 文件（可参考 `.env.example`）
 
-2. 在根目录下创建 `keys/` 文件夹并配置密钥
+2. 根目录放入nginx/default.conf
 
-3. 在同目录使用指令唤醒的docker（8个服务）
+3. 在根目录下创建 `keys/` 文件夹并配置密钥
+
+4. 在同目录使用指令唤醒的docker（8个服务）
 
    1. **加载镜像**：
 
       ```
-      docker load -i backend_v1.0.tar
+      docker load -i e-backendv1.1.tar
       ```
 
-   2. **启动服务**
+   2. **启动服务**docker load -i e-backendv1.1.tar
 
       ```
       docker-compose -f docker-compose-2.yml -p v2 up -d
@@ -206,18 +210,10 @@ docker exec -it ecommerce_backend python manage.py search_index --rebuild
 
       *(此时 Docker 会自动去网上下载 MySQL、Redis 等官方镜像，并使用你本地加载的 my-shop-backend 镜像启动 Django)*。
 
-4. 初始化数据
+5. 初始化数据
 
-   系统启动后，数据库是空的，需要进行初始化：
-
-   ```python
-   # 1. 创建超级管理员
-   docker exec -it ecommerce_backend python manage.py createsuperuser
-   
-   # 2. 初始化搜索引擎索引
-   docker exec -it ecommerce_backend python manage.py search_index --rebuild
-   ```
+   系统启动后，数据库是有默认管理员账户（账户admin、密码admin123456），并且包含一些数据
 
 
 
-## 
+#
