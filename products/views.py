@@ -1,3 +1,5 @@
+import logging
+
 
 
 from django_filters.rest_framework import DjangoFilterBackend
@@ -22,6 +24,7 @@ from django_elasticsearch_dsl_drf.viewsets import DocumentViewSet
 from .documents import ProductDocument
 
 
+logger = logging.getLogger(__name__)
 
 
 class ProductDocumentViewSet(DocumentViewSet):
@@ -125,7 +128,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         重写 list 方法，添加缓存装饰器。
         Locust 压测的主要目标就是这个接口。
         """
-        print("--- [DEBUG] 正在查询数据库 (如果没有看到这句话，说明走了缓存) ---")
+        logger.debug("[PRODUCT_CACHE][LIST_DB_QUERY] route=products_list")
         return super().list(request, *args, **kwargs)
 
     @method_decorator(cache_page(60 * 15))
@@ -141,7 +144,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     # 注意：cache_page 生成的 key 比较复杂，简单粗暴的做法是直接清空所有缓存，
     # 或者你可以研究更高级的 key 生成策略。这里我们为了演示效果，选择清空整个 default 缓存。
     def _clear_cache(self):
-        print("--- [DEBUG] 检测到数据变更，正在清空缓存... ---")
+        logger.info("[PRODUCT_CACHE][CLEAR_ALL] reason=product_data_changed")
         cache.clear()
 
     def perform_create(self, serializer):

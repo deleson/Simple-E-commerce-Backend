@@ -217,3 +217,49 @@ docker exec -it ecommerce_backend python manage.py search_index --rebuild
 
 
 #
+## 🔎 如何查看关键业务日志
+
+项目已在 `settings` 中配置统一 console logger，可直接从 Django / Celery 容器标准输出检索关键链路日志。
+
+### 1) 实时查看日志
+
+```bash
+# Django API 容器
+docker logs -f ecommerce_backend
+
+# Celery Worker
+docker logs -f ecommerce_celery_worker
+
+# Celery Beat
+docker logs -f ecommerce_celery_beat
+```
+
+### 2) 关键链路日志模板（可直接 grep）
+
+- **支付回调**（支付 webhook）
+  - `[PAYMENT_CALLBACK][RECEIVED] order_number=<...> trade_no=<...> trade_status=<...>`
+  - `[PAYMENT_CALLBACK][PROCESSED] order_number=<...> status=<...> sub_order_count=<...>`
+  - `[PAYMENT_CALLBACK][ERROR] order_number=<...> error=<...>`
+
+- **秒杀建单**（异步任务）
+  - `[SECKILL_CREATE_ORDER][SUCCESS] event_id=<...> user_id=<...> sku_id=<...> order_number=<...>`
+  - `[SECKILL_CREATE_ORDER][ERROR] event_id=<...> user_id=<...> sku_id=<...> error=<...>`
+
+- **超时关单**（定时任务）
+  - `[ORDER_TIMEOUT_CLOSE][SCAN] timeout_order_count=<...>`
+  - `[ORDER_TIMEOUT_CLOSE][SUCCESS] order_number=<...>`
+  - `[ORDER_TIMEOUT_CLOSE][STOCK_ROLLBACK] order_number=<...> sku_id=<...> rollback_qty=<...>`
+  - `[ORDER_TIMEOUT_CLOSE][ERROR] order_number=<...> error=<...>`
+
+### 3) 按链路过滤示例
+
+```bash
+# 支付回调日志
+docker logs ecommerce_backend 2>&1 | grep "\[PAYMENT_CALLBACK\]"
+
+# 秒杀建单日志
+docker logs ecommerce_celery_worker 2>&1 | grep "\[SECKILL_CREATE_ORDER\]"
+
+# 超时关单日志
+docker logs ecommerce_celery_worker 2>&1 | grep "\[ORDER_TIMEOUT_CLOSE\]"
+```

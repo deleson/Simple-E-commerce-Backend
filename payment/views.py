@@ -1,4 +1,6 @@
 # payment/views.py
+import logging
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
@@ -8,13 +10,15 @@ from django.utils.decorators import method_decorator
 
 from alipay import AliPay
 from orders.models import Order
-from products.models import ProductSKU
 from sellers.models import WalletTransaction
 from .models import Payment
 
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.http import HttpResponse
+
+
+logger = logging.getLogger(__name__)
 
 
 def payment_success_view(request):
@@ -49,7 +53,12 @@ class AlipayWebhookView(APIView):
         if success and data.get("trade_status") in ("TRADE_SUCCESS", "TRADE_FINISHED"):
             # 获取父订单号
             order_number = data.get('out_trade_no')
-            print(f"this is {order_number}")
+            logger.info(
+                "[PAYMENT_CALLBACK][RECEIVED] order_number=%s trade_no=%s trade_status=%s",
+                order_number,
+                data.get('trade_no'),
+                data.get('trade_status'),
+            )
 
             try:
                 # 在事务开始前就获取订单，获取父订单
@@ -131,6 +140,18 @@ class AlipayWebhookView(APIView):
                             transaction_id=f"PAYMENT_{data.get('trade_no')}",  # 使用支付宝的交易号
                             payment_type = Payment.PaymentType.PAYMENT
                         )
+                        logger.info(
+                            "[PAYMENT_CALLBACK][PROCESSED] order_number=%s status=%s sub_order_count=%s",
+                            order_number,
+                            parent_order.status,
+                            parent_order.sub_orders.count(),
+                        )
+                else:
+                    logger.info(
+                        "[PAYMENT_CALLBACK][SKIPPED] order_number=%s current_status=%s",
+                        order_number,
+                        parent_order.status,
+                    )
                 # 如果订单不是PENDING状态（比如已经处理过），也应该告诉支付宝成功了
 
                 # 【核心新增】向 WebSocket 推送消息
@@ -148,16 +169,26 @@ class AlipayWebhookView(APIView):
 
 
             except Order.DoesNotExist:
+                logger.warning(
+                    "[PAYMENT_CALLBACK][ORDER_NOT_FOUND] order_number=%s",
+                    order_number,
+                )
                 # 订单不存在，可能是伪造的请求，直接返回 failure
                 return Response("failure")
             except Exception as e:
-                # 捕获所有其他可能的异常，并记录日志
-                # 在生产环境中，这里应该用 logging 模块记录详细错误
-                print(f"--- [Webhook Error] 处理订单 {order_number} 时发生未知错误: {e}")
+                logger.exception(
+                    "[PAYMENT_CALLBACK][ERROR] order_number=%s error=%s",
+                    order_number,
+                    e,
+                )
                 return Response("failure")
 
             # 只要验签成功，且订单状态不再是 PENDING (说明已处理或正在处理)，都应返回 success
             return Response("success")
 
+        logger.warning(
+            "[PAYMENT_CALLBACK][VERIFY_FAILED] order_number=%s trade_status=%s",
+            data.get('out_trade_no'),
+            data.get('trade_status'),
+        )
         return Response("failure")
-
