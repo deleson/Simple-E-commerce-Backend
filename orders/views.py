@@ -14,12 +14,12 @@ from .serializers import OrderListSerializer, OrderDetailSerializer, OrderCreate
 from payment.models import Payment
 from users.permissions import IsCustomerUser, IsOwnerOrReadOnly
 
-# 引入支付宝
-from django.conf import settings
-from alipay import AliPay
 
 from sellers.models import WalletTransaction
 from products.models import ProductSKU
+
+# 引入工具类
+from common.utils.alipay import build_alipay_client
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -95,14 +95,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
 
         # 初始化支付宝 SDK
-        alipay = AliPay(
-            appid=settings.ALIPAY_CONFIG['APPID'],
-            app_notify_url=None,
-            app_private_key_string=settings.ALIPAY_CONFIG['APP_PRIVATE_KEY_STRING'],
-            alipay_public_key_string=settings.ALIPAY_CONFIG['ALIPAY_PUBLIC_KEY_STRING'],
-            sign_type=settings.ALIPAY_CONFIG['SIGN_TYPE'],
-            debug=settings.ALIPAY_CONFIG['DEBUG']
-        )
+        alipay = build_alipay_client()
 
         # 生成电脑网站支付页面 URL 的参数部分
         payment_params = alipay.api_alipay_trade_page_pay(
@@ -135,14 +128,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             return Response({'error': '只有已支付的订单才能退款。'}, status=status.HTTP_400_BAD_REQUEST)
 
         # 2.初始化支付宝SDK
-        alipay = AliPay(
-            appid=settings.ALIPAY_CONFIG['APPID'],
-            app_notify_url=None,
-            app_private_key_string=settings.ALIPAY_CONFIG['APP_PRIVATE_KEY_STRING'],
-            alipay_public_key_string=settings.ALIPAY_CONFIG['ALIPAY_PUBLIC_KEY_STRING'],
-            sign_type=settings.ALIPAY_CONFIG['SIGN_TYPE'],
-            debug=settings.ALIPAY_CONFIG['DEBUG']
-        )
+        alipay = build_alipay_client()
 
         # 3.发起支付宝退款请求
         # 这是一个同步调用，支付宝会直接返回结果

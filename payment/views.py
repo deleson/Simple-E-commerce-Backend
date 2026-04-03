@@ -6,7 +6,6 @@ from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
-from alipay import AliPay
 from orders.models import Order
 from products.models import ProductSKU
 from sellers.models import WalletTransaction
@@ -15,6 +14,10 @@ from .models import Payment
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.http import HttpResponse
+
+# 引入工具类
+from common.utils.alipay import build_alipay_client
+from common.utils.ws import push_order_status
 
 
 def payment_success_view(request):
@@ -35,14 +38,7 @@ class AlipayWebhookView(APIView):
         signature = data.pop("sign", None)
 
         # 初始化支付宝SDK
-        alipay = AliPay(
-            appid=settings.ALIPAY_CONFIG['APPID'],
-            app_notify_url=None,
-            app_private_key_string=settings.ALIPAY_CONFIG['APP_PRIVATE_KEY_STRING'],
-            alipay_public_key_string=settings.ALIPAY_CONFIG['ALIPAY_PUBLIC_KEY_STRING'],
-            sign_type=settings.ALIPAY_CONFIG['SIGN_TYPE'],
-            debug=settings.ALIPAY_CONFIG['DEBUG']
-        )
+        alipay = build_alipay_client()
 
         # 验签
         success = alipay.verify(data, signature)
@@ -74,27 +70,6 @@ class AlipayWebhookView(APIView):
                             sub.status = Order.OrderStatus.PAID
                             sub.save()
 
-                            #  因为改成下单减库存，所以下面全删掉了
-                            # # 遍历订单项 (这里不需要加锁，因为订单项本身不会变)
-                            # for item in sub.items.all():
-                            #
-                            #
-                            #     # 使用 product_id 重新查询 ProductSKU 表，并加上排他锁 (select_for_update)
-                            #     # 这行代码执行后，直到事务结束前，其他人都不能修改这件商品的库存
-                            #     try:
-                            #         product_sku = ProductSKU.objects.select_for_update().get(id=item.product.id)
-                            #     except ProductSKU.DoesNotExist:
-                            #         # 极端情况：商品被删除了
-                            #         raise Exception(f"Product {item.product_name} not found during payment.")
-                            #
-                            #     # 2. 检查库存 (这是基于最新、已锁定的数据检查，绝对安全)
-                            #     if item.quantity > product_sku.stock:
-                            #         # 抛出异常会触发事务回滚，之前的订单状态更新也会撤销
-                            #         raise Exception(f"Insufficient stock for {product_sku.name}")
-                            #         # 3. 扣减库存
-                            #         product_sku.stock -= item.quantity
-                            #         product_sku.save()
-
 
                             # 资金结算：给卖家钱包打钱
                             # 检查该子订单是否有卖家，且卖家是否有钱包
@@ -119,10 +94,6 @@ class AlipayWebhookView(APIView):
 
 
 
-
-
-
-
                         # C 创建支付记录，并填入所有必填字段
                         Payment.objects.create(
                             order=parent_order,
@@ -134,16 +105,7 @@ class AlipayWebhookView(APIView):
                 # 如果订单不是PENDING状态（比如已经处理过），也应该告诉支付宝成功了
 
                 # 【核心新增】向 WebSocket 推送消息
-                channel_layer = get_channel_layer()
-                # 发送给父订单的监听者
-                async_to_sync(channel_layer.group_send)(
-                    f"order_{parent_order.order_number}",  # 组名
-                    {
-                        "type": "order_status_update",  # 对应 Consumer 中的方法名
-                        "message": "支付成功",
-                        "status": "PAID"
-                    }
-                )
+                push_order_status(parent_order.order_number, "PAID", "支付成功")
 
 
 

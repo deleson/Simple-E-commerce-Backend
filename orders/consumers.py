@@ -2,6 +2,9 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 
+# 引入工具类
+from common.utils.redis_key import get_order_ws_group
+
 
 class OrderStatusConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -9,7 +12,8 @@ class OrderStatusConsumer(AsyncWebsocketConsumer):
         self.order_id = self.scope['url_route']['kwargs']['order_id']
 
         # 定义组名 (每个订单一个组)
-        self.room_group_name = f"order_{self.order_id}"
+        self.room_group_name = get_order_ws_group(self.order_id)
+
 
         # 将当前连接加入到这个组
         await self.channel_layer.group_add(

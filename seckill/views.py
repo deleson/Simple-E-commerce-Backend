@@ -7,6 +7,9 @@ from .models import SeckillEvent
 from .tasks import create_seckill_order_task
 from addresses.models import UserAddress
 
+# 引入工具类
+from common.utils.address import build_address_snapshot
+from common.utils.redis_key import get_seckill_stock_key
 
 class SeckillView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -22,13 +25,22 @@ class SeckillView(APIView):
         # 获取地址快照 (为了传给 Celery)
         try:
             addr = UserAddress.objects.get(id=address_id, user=user)
-            address_snapshot = f"{addr.signer_name} {addr.signer_mobile}..."
+            address_snapshot = build_address_snapshot(addr)
         except:
             return Response({"error": "地址无效"}, status=400)
 
         # 1. 连接 Redis
         redis_conn = get_redis_connection("seckill")
-        stock_key = f'seckill_stock_{event_id}'
+        stock_key = get_seckill_stock_key(event_id)
+
+
+        #         # ================== 第一道防线：用户维度防刷/防重复 ==================
+        #         lock_key = f"seckill:{event_id}:user:{user.id}"
+        #         # 尝试获取锁，nx=True保证只有一个请求能成功，ex=600设置10分钟过期防死锁
+        #         ok = redis_conn.set(lock_key, 1, nx=True, ex=600)
+        #         if not ok:
+        #             # 如果没拿到锁，说明10分钟内已经点过或者有并发请求，直接打回
+        #             return Response({"message": "您请求过于频繁或已参与过该秒杀"}, 400)
 
         # 2. 【核心】Lua 脚本：原子性判断并扣减库存
         # 返回 1 表示成功，0 表示库存不足

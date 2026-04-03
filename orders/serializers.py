@@ -9,6 +9,8 @@ from addresses.models import UserAddress
 # 【核心修正 1】引入新的 ProductSKU 模型，而不是 Product
 from products.models import ProductSKU
 
+# 引入工具类
+from common.utils.address import build_address_snapshot
 
 class OrderItemSerializer(serializers.ModelSerializer):
     """ 用于显示订单项的Serializer """
@@ -78,7 +80,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             try:
                 addr = UserAddress.objects.get(id=address_id, user=user)
                 # 生成快照
-                snapshot = f"{addr.signer_name} {addr.signer_mobile} {addr.province}{addr.city}{addr.district} {addr.address}"
+                snapshot = build_address_snapshot(addr)
+
             except UserAddress.DoesNotExist:
                 raise serializers.ValidationError({"address_id": "地址不存在。"})
         elif manual_address:

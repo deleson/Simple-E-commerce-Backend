@@ -9,6 +9,9 @@ from django.db import transaction
 from .models import SeckillEvent
 from products.models import ProductSKU
 
+# 引入工具类
+from common.utils.redis_key import get_seckill_stock_key
+
 
 # @receiver(post_save, sender=SeckillEvent)
 # def seckill_event_post_save(sender, instance, created, **kwargs):
@@ -43,7 +46,7 @@ def seckill_event_post_save(sender, instance, created, **kwargs):
     """
     # 1. 同步 Redis (保持不变)
     conn = get_redis_connection("seckill")
-    cache_key = f'seckill_stock_{instance.id}'
+    cache_key = get_seckill_stock_key(instance.id)
     conn.set(cache_key, instance.seckill_stock)
     print(f"--- [Signal] Redis 预热完成: {cache_key} = {instance.seckill_stock} ---")
 
@@ -79,7 +82,8 @@ def seckill_event_post_delete(sender, instance, **kwargs):
     """
     # 1. 清理 Redis
     conn = get_redis_connection("seckill")
-    cache_key = f'seckill_stock_{instance.id}'
+    cache_key = get_seckill_stock_key(instance.id)
+
     conn.delete(cache_key)
 
     # 2. 归还库存
