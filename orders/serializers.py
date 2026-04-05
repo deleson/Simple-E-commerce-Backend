@@ -1,13 +1,10 @@
 # orders/serializers.py
-from collections import defaultdict
-
 from rest_framework import serializers
-from django.db import transaction
 from .models import Order, OrderItem
 from cart.models import CartItem
 from addresses.models import UserAddress
-# 【核心修正 1】引入新的 ProductSKU 模型，而不是 Product
-from products.models import ProductSKU
+from common.exceptions import BusinessError
+from .services import create_order_from_cart
 
 # 引入工具类
 from common.utils.address import build_address_snapshot
@@ -95,85 +92,16 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        user = self.context['request'].user
-        address_snapshot = validated_data['final_address_snapshot']
+        user = self.context["request"].user
+        address_snapshot = validated_data["final_address_snapshot"]
 
-        # a. 获取购物车并预加载关联数据 (SKU -> SPU -> Seller)
-        cart_items = CartItem.objects.filter(user=user).select_related('product__spu__seller')
-
-        # b. 【核心算法】按卖家分组
-        # 结构: { <User: SellerA>: [CartItem1, ...], <User: SellerB>: [...] }
-        seller_groups = defaultdict(list)
-        for item in cart_items:
-            seller = item.product.spu.seller
-            seller_groups[seller].append(item)
-
-        # c. 计算总金额 (所有子订单之和)
-        grand_total = sum(item.product.price * item.quantity for item in cart_items)
-
-        with transaction.atomic():
-            # --- Step 1: 创建父订单 (Parent Order) ---
-            parent_order = Order.objects.create(
+        try:
+            return create_order_from_cart(
                 user=user,
-                parent=None,  # 显式标记为父订单
-                seller=None,  # 父订单属于平台聚合，不属于特定卖家
-                total_amount=grand_total,
-                shipping_address=address_snapshot,
-                status=Order.OrderStatus.PENDING
+                address_snapshot=address_snapshot,
             )
-
-            # --- Step 2: 创建子订单 (Sub Orders) ---
-            for seller, items in seller_groups.items():
-                # 计算该子订单的小计金额
-                sub_total = sum(item.product.price * item.quantity for item in items)
-
-                sub_order = Order.objects.create(
-                    user=user,
-                    parent=parent_order,  # 关联到父订单
-                    seller=seller,  # 关联到具体卖家
-                    total_amount=sub_total,
-                    shipping_address=address_snapshot,
-                    status=Order.OrderStatus.PENDING
-                )
-
-                # --- Step 3: 创建订单项 (Order Items) ---
-                # 注意：订单项必须挂载在【子订单】下
-                for item in items:
-
-                    # 1. 锁定商品行 (Pessimistic Lock)
-                    # 必须重新查询并加锁，确保库存数据是最新的
-                    try:
-                        product_sku = ProductSKU.objects.select_for_update().get(id=item.product.id)
-                    except ProductSKU.DoesNotExist:
-                        raise serializers.ValidationError(f"商品 {item.product.name} 已下架，请移除后重试。")
-
-                    # 2. 检查库存
-                    if item.quantity > product_sku.stock:
-                        raise serializers.ValidationError(
-                            f"商品 {product_sku.name} 库存不足，仅剩 {product_sku.stock} 件。")
-
-                    # 3. 扣减库存
-                    product_sku.stock -= item.quantity
-                    product_sku.save()
-
-
-
-                    # 4. 创建OrderItem
-                    OrderItem.objects.create(
-                        order=sub_order,  # 挂载到子订单
-                        product=item.product,
-                        product_name=f"{item.product.spu.name} {item.product.name}",
-                        product_price=item.product.price,
-                        quantity=item.quantity
-                    )
-
-            # d. 清空购物车
-            cart_items.delete()
-
-        # 返回父订单给前端去支付
-        return parent_order
-
-
+        except BusinessError as e:
+            raise serializers.ValidationError({"detail": str(e)})
 
 # class OrderCreateSerializer(serializers.ModelSerializer):
 #     """ 用于“创建”订单的Serializer """

@@ -1,22 +1,14 @@
 # orders/views.py
-import uuid
 from django.db.models import Prefetch
-
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-# 【关键】引入数据库事务
-from django.db import transaction
-
+from common.exceptions import BusinessError
+from .services import refund_sub_order
 from .models import Order
 from .serializers import OrderListSerializer, OrderDetailSerializer, OrderCreateSerializer
-# 引入支付模型
-from payment.models import Payment
 from users.permissions import IsCustomerUser, IsOwnerOrReadOnly
-
-
-from sellers.models import WalletTransaction
-from products.models import ProductSKU
+from django.conf import settings
 
 # 引入工具类
 from common.utils.alipay import build_alipay_client
@@ -115,93 +107,22 @@ class OrderViewSet(viewsets.ModelViewSet):
     def refund(self, request, order_number=None):
         """
         子订单退款接口
-        用户对某个子订单发起退款 -> 支付宝退钱 -> 扣除卖家余额 -> 恢复库存
         """
-        # 1.获取想要退款的子订单
         sub_order = self.get_object()
 
-        # 检查是否合法：必须是子订单，且已支付
-        if not sub_order.parent:
-            return Response({'error': '只能对子订单发起退款申请。'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if sub_order.status != Order.OrderStatus.PAID:
-            return Response({'error': '只有已支付的订单才能退款。'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 2.初始化支付宝SDK
-        alipay = build_alipay_client()
-
-        # 3.发起支付宝退款请求
-        # 这是一个同步调用，支付宝会直接返回结果
-        refund_request_no = str(uuid.uuid4())  # 本次退款操作的唯一流水号
-
         try:
-            response = alipay.api_alipay_trade_refund(
-                out_trade_no=str(sub_order.parent.order_number),
-                refund_amount = float(sub_order.total_amount),
-                out_request_no=refund_request_no,
-                refund_reason = f"Refund for sub-order{sub_order.order_number}"
+            response = refund_sub_order(sub_order=sub_order)
+            return Response(
+                {"message":"refund correct","alipay_response":response},
+                status=status.HTTP_200_OK,
             )
 
-            # 4. 处理支付宝响应
-            # code='10000' 代表接口调用成功，fund_change='Y' 代表资金确实发生了变动
-            if response.get('code') == '10000' and response.get('fund_change') == 'Y':
 
-                with transaction.atomic():
-                    # A. 更新子订单状态
-                    sub_order.status = Order.OrderStatus.REFUNDED
-                    sub_order.save()
-
-                    # B. 库存回滚 (加回去)
-                    # 使用 select_for_update 锁定商品行，保证并发安全
-                    for item in sub_order.items.all():
-                        try:
-                            product_sku = ProductSKU.objects.select_for_update().get(id=item.product.id)
-                            product_sku.stock += item.quantity
-                            product_sku.save()
-                        except ProductSKU.DoesNotExist:
-                            continue  # 商品如果被删了就不处理库存了
-
-                    # C. 卖家资金扣除
-                    if hasattr(sub_order.seller, 'wallet'):
-                        wallet = sub_order.seller.wallet
-                        refund_money = sub_order.total_amount
-
-                        # 直接扣减余额 (允许变负，或者你可以加逻辑判断 check balance >= refund_money)
-                        wallet.balance -= refund_money
-                        wallet.total_income -= refund_money
-                        wallet.save()
-
-                        # 记录退款流水
-                        WalletTransaction.objects.create(
-                            wallet=wallet,
-                            amount=-refund_money,  # 负数表示支出
-                            type=WalletTransaction.TransactionType.REFUND,
-                            order=sub_order,
-                            description=f"订单退款：{sub_order.order_number}"
-                        )
-
-                    # 记录这是针对子订单的退款
-                    Payment.objects.create(
-                        order=sub_order,  # 关联到子订单
-                        amount=sub_order.total_amount,
-                        status=Payment.PaymentStatus.SUCCESS,
-                        payment_type=Payment.PaymentType.REFUND,  # 标记为退款
-                        # 支付宝退款接口通常不返回新的 trade_no，而是沿用原支付的 trade_no
-                        # 或者返回一个本次操作的 refund_id。
-                        # 这里为了唯一性，我们可以存 "REFUND_" + 支付宝返回的流水号，或者直接存我们的 refund_request_no
-                        transaction_id=f"REFUND_{sub_order.order_number}"
-                    )
-
-                return Response({'message': '退款成功', 'alipay_response': response}, status=status.HTTP_200_OK)
-
-            else:
-                # 支付宝拒绝了退款 (可能是余额不足、超过退款期限等)
-                error_msg = response.get('sub_msg', 'Alipay refund failed')
-                return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
+        except BusinessError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            return Response({'error': f"系统错误: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            return Response({"error": f"系统错误: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def perform_create(self, serializer):
         #创建订单时自动关联当前用户

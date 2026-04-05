@@ -3,7 +3,6 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import permissions, status
 from django_redis import get_redis_connection
-from .models import SeckillEvent
 from .tasks import create_seckill_order_task
 from addresses.models import UserAddress
 

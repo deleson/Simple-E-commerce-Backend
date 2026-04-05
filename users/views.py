@@ -1,21 +1,24 @@
 # users/views.py
-from django.contrib.auth.models import Group
 from rest_framework.response import Response
-from .models import MyUser
-from .serializers import UserRegisterSerializer,UserSerializer
-from rest_framework import generics, permissions,status
+from rest_framework import generics, permissions, status
 from rest_framework.views import APIView
-from sellers.models import SellerProfile, Wallet
-from django.db import transaction
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from .serializers import PasswordResetRequestSerializer, PasswordResetConfirmSerializer
+
+from .models import MyUser
+from .serializers import (
+    UserRegisterSerializer,
+    UserSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetConfirmSerializer,
+)
 from .tasks import send_password_reset_email_task
+from .services import apply_for_seller
 
-
+from common.exceptions import BusinessError
 
 
 
@@ -125,42 +128,23 @@ class ApplyForSellerView(APIView):
 
     def post(self, request, *args, **kwargs):
         user = request.user
-
-        # 1. 检查是否已经是卖家 (检查 Group 或 Profile)
-        if hasattr(user, 'seller_profile'):
-            return Response({'message': 'You are already a seller.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 2. 获取店铺名称 (必填)
-        shop_name = request.data.get('shop_name')
-        if not shop_name:
-            return Response({'error': 'Shop name is required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 检查店铺名是否被占用
-        if SellerProfile.objects.filter(shop_name=shop_name).exists():
-            return Response({'error': 'Shop name already taken.'}, status=status.HTTP_400_BAD_REQUEST)
+        shop_name = request.data.get("shop_name")
+        shop_description = request.data.get("shop_description", "")
 
         try:
-            with transaction.atomic():
+            apply_for_seller(
+                user=user,
+                shop_name=shop_name,
+                shop_description=shop_description,
+            )
 
-                # 初始化钱包
-                if not hasattr(user, 'wallet'):
-                    Wallet.objects.create(user=user)
+            return Response(
+                {"message": f'Congratulations! Shop "{shop_name}" created successfully.'},
+                status=status.HTTP_201_CREATED,
+            )
 
-                # 3. 将用户加入 Seller 组
-                seller_group = Group.objects.get(name='Seller')
-                user.groups.add(seller_group)
-
-                # 4. 创建店铺档案
-                SellerProfile.objects.create(
-                    user=user,
-                    shop_name=shop_name,
-                    shop_description=request.data.get('shop_description', '')
-                )
-
-            return Response({'message': f'Congratulations! Shop "{shop_name}" created successfully.'},
-                            status=status.HTTP_201_CREATED)
+        except BusinessError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
